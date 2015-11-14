@@ -31,10 +31,14 @@ private:
 	GstElement *appsrc_;
 
 	// XXX TODO
+
+	void image_cb(const sensor_msgs::Image::ConstPtr &msg);
 };
 
 GstVideoServerNodelet::GstVideoServerNodelet() :
-	nodelet::Nodelet()
+	nodelet::Nodelet(),
+	pipeline_(nullptr),
+	appsrc_(nullptr)
 {
 }
 
@@ -44,8 +48,18 @@ GstVideoServerNodelet::~GstVideoServerNodelet()
 
 void GstVideoServerNodelet::onInit()
 {
+	NODELET_INFO("Starting gst_video_server instance");
+
 	ros::NodeHandle &nh = getNodeHandle();
 	ros::NodeHandle &priv_nh = getPrivateNodeHandle();
+	image_transport_.reset(new image_transport::ImageTransport(nh));
+
+	image_sub_ = image_transport_->subscribe("image_raw", 10, &GstVideoServerNodelet::image_cb, this);
+}
+
+void GstVideoServerNodelet::image_cb(const sensor_msgs::Image::ConstPtr &msg)
+{
+	NODELET_DEBUG("got image");	// XXX
 }
 
 }; // namespace gst_video_server
@@ -53,40 +67,3 @@ void GstVideoServerNodelet::onInit()
 // Register nodelet
 #include <pluginlib/class_list_macros.h>
 PLUGINLIB_EXPORT_CLASS(gst_video_server::GstVideoServerNodelet, nodelet::Nodelet);
-
-#if 0
-class ImageStreamer
-{
-	ros::NodeHandle nh_;
-	image_transport::ImageTransport it_;
-	image_transport::Subscriber image_sub_;
-
-public:
-	ImageStreamer()
-		: it_(nh_)
-	{
-		// Subscrive to input video feed
-		image_sub_ = it_.subscribe("/camera/image_raw", 1,
-					   &ImageStreamer::imageCb, this);
-
-	}
-
-	~ImageStreamer()
-	{
-	}
-
-	void imageCb(const sensor_msgs::ImageConstPtr &msg)
-	{
-		cv_bridge::CvImagePtr cv_ptr;
-
-		try {
-			cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
-
-		} catch (cv_bridge::Exception &e) {
-			ROS_ERROR("cv_bridge exception: %s", e.what());
-			return;
-		}
-
-	}
-};
-#endif
