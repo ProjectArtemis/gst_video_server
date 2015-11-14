@@ -1,31 +1,23 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>rtsp_streamer</name>
+  <name>gst_video_server</name>
   <version>0.0.0</version>
-  <description>The rtsp_streamer package</description>
+  <description>
+    gst_video_server stream Image streams with user defined GStreamer pipelines.
 
-  <!-- One maintainer tag required, multiple allowed, one person per tag --> 
-  <!-- Example:  -->
-  <!-- <maintainer email="jane.doe@example.com">Jane Doe</maintainer> -->
-  <maintainer email="kabir@todo.todo">kabir</maintainer>
+    GStreamer support RTP, RTSP and many other protocols.
+  </description>
 
-
-  <!-- One license tag required, multiple allowed, one license per tag -->
-  <!-- Commonly used license strings: -->
-  <!--   BSD, MIT, Boost Software License, GPLv2, GPLv3, LGPLv2.1, LGPLv3 -->
-  <license>TODO</license>
-
+  <license>ASFv2</license> <!-- Apache Software License 2.0 -->
 
   <!-- Url tags are optional, but mutiple are allowed, one per tag -->
   <!-- Optional attribute type can be: website, bugtracker, or repository -->
   <!-- Example: -->
   <!-- <url type="website">http://wiki.ros.org/rtsp_streamer</url> -->
 
-
-  <!-- Author tags are optional, mutiple are allowed, one per tag -->
-  <!-- Authors do not have to be maintianers, but could be -->
-  <!-- Example: -->
-  <!-- <author email="jane.doe@example.com">Jane Doe</author> -->
+  <maintainer email="kabir@todo.todo">kabir</maintainer>
+  <author email="kabir@todo.todo">kabir</author>
+  <author email="vooon341@gmail.com">Vladimir Ermakov</author>
 
 
   <buildtool_depend>catkin</buildtool_depend>
@@ -37,16 +29,14 @@
   <exec_depend>libgstreamer-plugins-base1.0-0</exec_depend>
 
   <!-- packages -->
-  <depend>cv_bridge</depend> <!-- we really need opencv? -->
+  <depend>nodelet</depend>
   <depend>image_transport</depend>
   <depend>roscpp</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
 
-
-  <!-- The export tag contains other, unspecified, tags -->
   <export>
-    <!-- Other tools can request additional information be placed here -->
-
+    <nodelet plugin="${prefix}/nodelet_plugins.xml"/>
   </export>
+  <!-- vim:set ts=2 sw=2 et: -->
 </package>

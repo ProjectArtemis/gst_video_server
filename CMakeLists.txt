@@ -1,21 +1,16 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(rtsp_streamer)
+project(gst_video_server)
 
 ## Find catkin macros and libraries
-## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
-## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
-  cv_bridge
+  nodelet
   image_transport
   roscpp
   sensor_msgs
   std_msgs
 )
 
-## System dependencies are found with CMake's conventions
-# find_package(Boost REQUIRED COMPONENTS system)
-
-## GSTreamer 1.0 package required
+## GStreamer 1.0 package required
 find_package(PkgConfig)
 
 macro(find_gstreamer_component prefix pkg lib)
@@ -44,9 +39,9 @@ find_gstreamer_component(gstvideo gstreamer-video-1.0 gstvideo-1.0)
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES rtsp_streamer
-  CATKIN_DEPENDS cv_bridge image_transport roscpp sensor_msgs std_msgs
+  INCLUDE_DIRS include
+  LIBRARIES gstvideoserver
+  CATKIN_DEPENDS nodelet image_transport roscpp sensor_msgs std_msgs
   DEPENDS libgstreamer1.0-dev
 )
 
@@ -59,10 +54,20 @@ include_directories(
   ${gstreamer_INCLUDE_DIRS}
 )
 
-add_executable(rtsp_streamer src/streamer.cpp)
-target_link_libraries(rtsp_streamer
+add_library(gstvideoserver
+  src/server.cpp
+  src/nodelet.cpp)
+target_link_libraries(gstvideoserver
    ${catkin_LIBRARIES}
    ${gstreamer_LIBRARIES}
+)
+
+add_executable(server_node
+  src/node.cpp
+)
+target_link_libraries(server_node
+  gstvideoserver
+  ${catkin_LIBRARIES}
 )
 
 #############
@@ -73,18 +78,16 @@ target_link_libraries(rtsp_streamer
 # See http://ros.org/doc/api/catkin/html/adv_user_guide/variables.html
 
 ## Mark executables and/or libraries for installation
-install(TARGETS rtsp_streamer
+install(TARGETS gstvideoserver server_node
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
-## Mark cpp header files for installation
-# install(DIRECTORY include/${PROJECT_NAME}/
-#   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-#   FILES_MATCHING PATTERN "*.h"
-#   PATTERN ".svn" EXCLUDE
-# )
+install(DIRECTORY include/${PROJECT_NAME}/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+  FILES_MATCHING PATTERN "*.h"
+)
 
 #############
 ## Testing ##
