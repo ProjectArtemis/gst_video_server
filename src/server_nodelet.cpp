@@ -32,6 +32,7 @@ private:
 
 	// XXX TODO
 
+	void configure_pipeline();
 	void image_cb(const sensor_msgs::Image::ConstPtr &msg);
 };
 
@@ -48,13 +49,34 @@ GstVideoServerNodelet::~GstVideoServerNodelet()
 
 void GstVideoServerNodelet::onInit()
 {
-	NODELET_INFO("Starting gst_video_server instance");
+	NODELET_INFO("Starting gst_video_server instance: %s", getName().c_str());
 
+	// init image transport
 	ros::NodeHandle &nh = getNodeHandle();
 	ros::NodeHandle &priv_nh = getPrivateNodeHandle();
-	image_transport_.reset(new image_transport::ImageTransport(nh));
+	image_transport_.reset(new image_transport::ImageTransport(priv_nh));
 
+	// load configuration
+	if (!priv_nh.getParam("pipeline", gsconfig_)) {
+		NODELET_ERROR("No pipeline configuration found!");
+		return;
+	}
+
+	NODELET_INFO("Pipeline: %s", gsconfig_.c_str());
+	configure_pipeline();
+
+	// finally: subscribe
 	image_sub_ = image_transport_->subscribe("image_raw", 10, &GstVideoServerNodelet::image_cb, this);
+}
+
+void GstVideoServerNodelet::configure_pipeline()
+{
+	if (!gst_is_initialized()) {
+		NODELET_INFO("Initializing gstreamer");
+		gst_init(nullptr, nullptr);
+	}
+
+	NODELET_INFO("Gstreamer: %s", gst_version_string());
 }
 
 void GstVideoServerNodelet::image_cb(const sensor_msgs::Image::ConstPtr &msg)
