@@ -32,7 +32,7 @@ private:
 
 	// XXX TODO
 
-	void configure_pipeline();
+	bool configure_pipeline();
 	void image_cb(const sensor_msgs::Image::ConstPtr &msg);
 };
 
@@ -45,6 +45,8 @@ GstVideoServerNodelet::GstVideoServerNodelet() :
 
 GstVideoServerNodelet::~GstVideoServerNodelet()
 {
+	gst_object_unref(GST_OBJECT(appsrc_));
+	gst_object_unref(GST_OBJECT(pipeline_));
 }
 
 void GstVideoServerNodelet::onInit()
@@ -69,7 +71,7 @@ void GstVideoServerNodelet::onInit()
 	image_sub_ = image_transport_->subscribe("image_raw", 10, &GstVideoServerNodelet::image_cb, this);
 }
 
-void GstVideoServerNodelet::configure_pipeline()
+bool GstVideoServerNodelet::configure_pipeline()
 {
 	if (!gst_is_initialized()) {
 		NODELET_INFO("Initializing gstreamer");
@@ -77,6 +79,71 @@ void GstVideoServerNodelet::configure_pipeline()
 	}
 
 	NODELET_INFO("Gstreamer: %s", gst_version_string());
+
+	GError *error = nullptr;
+	pipeline_ = gst_parse_launch(gsconfig_.c_str(), &error);
+	if (pipeline_ == nullptr) {
+		NODELET_ERROR("GST: %s", error->message);
+		return false;
+	}
+
+	appsrc_ = gst_element_factory_make("appsrc", "source");
+	if (appsrc_ == nullptr) {
+		NODELET_ERROR("GST: failed to create appsrc!");
+		return false;
+	}
+
+	// gst_parse_launch() may produce not a pipeline
+	// thanks to gscam for example
+	if (GST_IS_PIPELINE(pipeline_)) {
+		// find pipeline sink (where we may link appsrc)
+		GstPad *inpad = gst_bin_find_unlinked_pad(GST_BIN(pipeline_), GST_PAD_SINK);
+		g_assert(inpad);
+
+		GstElement *inelement = gst_pad_get_parent_element(inpad);
+		g_assert(inelement);
+		gst_object_unref(GST_OBJECT(inpad));
+		NODELET_INFO("GST: inelement: %s", gst_element_get_name(inelement)); // XXX DEBUG
+
+		if (!gst_bin_add(GST_BIN(pipeline_), appsrc_)) {
+			NODELET_ERROR("GST: gst_bin_add() failed!");
+			gst_object_unref(GST_OBJECT(pipeline_));
+			gst_object_unref(GST_OBJECT(inelement));
+			return false;
+		}
+
+		if (!gst_element_link(appsrc_, inelement)) {
+			NODELET_ERROR("GST: cannot link %s -> %s",
+					gst_element_get_name(appsrc_),
+					gst_element_get_name(inelement));
+			gst_object_unref(GST_OBJECT(pipeline_));
+			gst_object_unref(GST_OBJECT(inelement));
+			return false;
+		}
+
+		gst_object_unref(GST_OBJECT(inelement));
+	}
+	else {
+		// we have one sink element, create bin and link it.
+		GstElement *launchpipe = pipeline_;
+		pipeline_ = gst_pipeline_new(nullptr);
+		g_assert(pipeline_);
+
+		gst_object_unparent(GST_OBJECT(launchpipe));
+
+		NODELET_INFO("GST: launchpipe: %s", gst_element_get_name(launchpipe)); // XXX DEBUG
+		gst_bin_add_many(GST_BIN(pipeline_), appsrc_, launchpipe, nullptr);
+
+		if (!gst_element_link(appsrc_, launchpipe)) {
+			NODELET_ERROR("GST: cannot link %s -> %s",
+					gst_element_get_name(appsrc_),
+					gst_element_get_name(launchpipe));
+			gst_object_unref(GST_OBJECT(pipeline_));
+			return false;
+		}
+	}
+
+	// XXX TODO
 }
 
 void GstVideoServerNodelet::image_cb(const sensor_msgs::Image::ConstPtr &msg)
