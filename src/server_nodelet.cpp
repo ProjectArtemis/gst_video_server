@@ -50,6 +50,10 @@ void GstVideoServerNodelet::onInit()
 
 }; // namespace gst_video_server
 
+// Register nodelet
+#include <pluginlib/class_list_macros.h>
+PLUGINLIB_EXPORT_CLASS(gst_video_server::GstVideoServerNodelet, nodelet::Nodelet);
+
 #if 0
 class ImageStreamer
 {
