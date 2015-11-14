@@ -29,6 +29,17 @@ find_gstreamer_component(gstvideo gstreamer-video-1.0 gstvideo-1.0)
 #message(STATUS "inc: ${gstreamer_INCLUDE_DIRS}")
 #message(STATUS "lib: ${gstreamer_LIBRARIES}")
 
+# C++11 required!
+include(CheckCXXCompilerFlag)
+
+check_cxx_compiler_flag("-std=c++11" COMPILER_SUPPORTS_STD_CXX11)
+if (COMPILER_SUPPORTS_STD_CXX11)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+else ()
+  message(FATAL_ERROR "The compiler ${CMAKE_CXX_COMPILER} has no C++11 support. Please use a different C++ compiler.")
+endif ()
+
+
 ###################################
 ## catkin specific configuration ##
 ###################################
@@ -39,7 +50,7 @@ find_gstreamer_component(gstvideo gstreamer-video-1.0 gstvideo-1.0)
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-  INCLUDE_DIRS include
+#  INCLUDE_DIRS include
   LIBRARIES gstvideoserver
   CATKIN_DEPENDS nodelet image_transport roscpp sensor_msgs std_msgs
   DEPENDS libgstreamer1.0-dev
@@ -55,8 +66,8 @@ include_directories(
 )
 
 add_library(gstvideoserver
-  src/server.cpp
-  src/nodelet.cpp)
+  src/server_nodelet.cpp
+)
 target_link_libraries(gstvideoserver
    ${catkin_LIBRARIES}
    ${gstreamer_LIBRARIES}
@@ -66,7 +77,6 @@ add_executable(server_node
   src/node.cpp
 )
 target_link_libraries(server_node
-  gstvideoserver
   ${catkin_LIBRARIES}
 )
 
@@ -84,10 +94,10 @@ install(TARGETS gstvideoserver server_node
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
-install(DIRECTORY include/${PROJECT_NAME}/
-  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-  FILES_MATCHING PATTERN "*.h"
-)
+#install(DIRECTORY include/${PROJECT_NAME}/
+#  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+#  FILES_MATCHING PATTERN "*.h"
+#)
 
 #############
 ## Testing ##

@@ -1,8 +1,8 @@
 <library path="lib/libgstvideoserver">
   <!-- vim: set ts=2 sw=2 et: -->
   <class
-    name="gst_video_server/ServerNodelet"
-    type="gst_video_server::ServerNodelet"
+    name="gst_video_server/server"
+    type="gst_video_server::GstVideoServerNodelet"
     base_class_type="nodelet::Nodelet">
     <description>Nodelet for serving streams from ROS to GStreamer pipeline.</description>
   </class>
