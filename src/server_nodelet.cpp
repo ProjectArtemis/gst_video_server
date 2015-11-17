@@ -270,13 +270,34 @@ GstCaps* GstVideoServerNodelet::gst_caps_new_from_image(const sensor_msgs::Image
 
 GstSample* GstVideoServerNodelet::gst_sample_new_from_image(const sensor_msgs::Image::ConstPtr &msg)
 {
-	// XXX TODO
-	return nullptr;
+	// unfortunately we may not move image data because it is immutable. copying.
+	auto buffer = gst_buffer_new_allocate(nullptr, msg->data.size(), nullptr);
+	g_assert(buffer);
+
+	GstClockTime ts = (msg->header.stamp.toSec() - time_offset_) * GST_SECOND;
+
+	gst_buffer_fill(buffer, 0, msg->data.data(), msg->data.size());
+	GST_BUFFER_FLAG_SET(buffer, GST_BUFFER_FLAG_LIVE);
+	// NOTE(vooon): when i fill any of that timestamp autovideosink show only first frame.
+	//GST_BUFFER_PTS(buffer) = ts;
+	//GST_BUFFER_DTS(buffer) = ts;
+
+	auto caps = gst_caps_new_from_image(msg);
+	if (caps == nullptr) {
+		gst_object_unref(GST_OBJECT(buffer));
+		return nullptr;
+	}
+
+	auto sample = gst_sample_new(buffer, caps, nullptr, nullptr);
+	gst_buffer_unref(buffer);
+	gst_caps_unref(caps);
+
+	return sample;
 }
 
 void GstVideoServerNodelet::image_cb(const sensor_msgs::Image::ConstPtr &msg)
 {
-	NODELET_INFO("got image: %d x %d", msg->width, msg->height);	// XXX
+	NODELET_DEBUG("Image: %d x %d, stamp %f", msg->width, msg->height, msg->header.stamp.toSec());
 
 	GstState state, next_state;
 
@@ -286,7 +307,7 @@ void GstVideoServerNodelet::image_cb(const sensor_msgs::Image::ConstPtr &msg)
 	}
 	else if (state_change == GST_STATE_CHANGE_FAILURE) {
 		NODELET_INFO("GST: pipeline state change failure. will retry...");
-		NODELET_INFO("GST: next_state=%d", next_state);
+		// TODO(vooon): need error handling and restart!
 	}
 
 	// pipeline not yet playing, configure and start
@@ -304,7 +325,12 @@ void GstVideoServerNodelet::image_cb(const sensor_msgs::Image::ConstPtr &msg)
 		gst_element_set_state(pipeline_, GST_STATE_PLAYING);
 	}
 
-	// XXX TODO: feed appsrc
+	auto sample = gst_sample_new_from_image(msg);
+	if (sample == nullptr)
+		return;
+
+	gst_app_src_push_sample(GST_APP_SRC_CAST(appsrc_), sample); // XXX check return!
+	gst_sample_unref(sample);
 }
 
 gboolean GstVideoServerNodelet::bus_message_cb_wrapper(GstBus *bus, GstMessage *message, gpointer data)
