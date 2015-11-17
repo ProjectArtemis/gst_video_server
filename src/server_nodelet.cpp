@@ -30,23 +30,37 @@ private:
 	GstElement *pipeline_;
 	GstElement *appsrc_;
 
+	//! offset from ROS to GST time
+	double time_offset_;
+
 	// XXX TODO
 
 	bool configure_pipeline();
+	bool configure_appsrc_caps(const sensor_msgs::Image::ConstPtr &msg);
 	void image_cb(const sensor_msgs::Image::ConstPtr &msg);
 };
 
 GstVideoServerNodelet::GstVideoServerNodelet() :
 	nodelet::Nodelet(),
 	pipeline_(nullptr),
-	appsrc_(nullptr)
+	appsrc_(nullptr),
+	time_offset_(0.0)
 {
 }
 
 GstVideoServerNodelet::~GstVideoServerNodelet()
 {
-	gst_object_unref(GST_OBJECT(appsrc_));
-	gst_object_unref(GST_OBJECT(pipeline_));
+	NODELET_INFO("Terminating gst_video_server...");
+	if (appsrc_ != nullptr) {
+		gst_object_unref(GST_OBJECT(appsrc_));
+		appsrc_ = nullptr;
+	}
+
+	if (pipeline_ != nullptr) {
+		gst_element_set_state(pipeline_, GST_STATE_NULL);
+		gst_object_unref(GST_OBJECT(pipeline_));
+		pipeline_ = nullptr;
+	}
 }
 
 void GstVideoServerNodelet::onInit()
@@ -56,12 +70,12 @@ void GstVideoServerNodelet::onInit()
 	// init image transport
 	ros::NodeHandle &nh = getNodeHandle();
 	ros::NodeHandle &priv_nh = getPrivateNodeHandle();
-	image_transport_.reset(new image_transport::ImageTransport(priv_nh));
+	image_transport_.reset(new image_transport::ImageTransport(nh));
 
 	// load configuration
 	if (!priv_nh.getParam("pipeline", gsconfig_)) {
-		NODELET_ERROR("No pipeline configuration found!");
-		return;
+		NODELET_WARN("No pipeline configuration found! Used default testing bin.");
+		gsconfig_ = "autovideoconvert ! autovideosink";
 	}
 
 	NODELET_INFO("Pipeline: %s", gsconfig_.c_str());
@@ -143,12 +157,91 @@ bool GstVideoServerNodelet::configure_pipeline()
 		}
 	}
 
-	// XXX TODO
+	// Calculating clock offset (should be before pausing else obtain will block)
+	auto clock = gst_system_clock_obtain();
+	auto now = ros::Time::now();
+	auto ct = gst_clock_get_time(clock);
+	gst_object_unref(GST_OBJECT(clock));
+	time_offset_ = now.toSec() - GST_TIME_AS_USECONDS(ct)/1e6;
+	NODELET_INFO("Time offset: %f", time_offset_);
+
+	// pause pipeline
+	gst_element_set_state(pipeline_, GST_STATE_PAUSED);
+	//if (gst_element_get_state(pipeline_, nullptr, nullptr, -1) == GST_STATE_CHANGE_FAILURE) {
+	//	NODELET_ERROR("GST: state change error. Check your pipeline.");
+	//	return false;
+	//}
+	//else {
+		NODELET_INFO("GST: pipeline paused.");
+	//}
+
+	return true;
+}
+
+bool GstVideoServerNodelet::configure_appsrc_caps(const sensor_msgs::Image::ConstPtr &msg)
+{
+	// http://gstreamer.freedesktop.org/data/doc/gstreamer/head/pwg/html/section-types-definitions.html
+	static const ros::M_string known_formats = {{
+		{enc::RGB8, "RGB"},
+		{enc::RGB16, "RGB16"},
+		{enc::RGBA8, "RGBA"},
+		{enc::RGBA16, "RGBA16"},
+		{enc::BGR8, "BGR"},
+		{enc::BGR16, "BGR16"},
+		{enc::BGRA8, "BGRA"},
+		{enc::BGRA16, "BGRA16"},
+		{enc::MONO8, "GRAY8"},
+		{enc::MONO16, "GRAY16_LE"},
+	}};
+
+	if (msg->is_bigendian) {
+		NODELET_ERROR("GST: big endian image format is not supported");
+		return false;
+	}
+
+	auto format = known_formats.find(msg->encoding);
+	if (format == known_formats.end()) {
+		NODELET_ERROR("GST: image format '%s' unknown", msg->encoding.c_str());
+		return false;
+	}
+
+	auto caps = gst_caps_new_simple("video/x-raw",
+			"format", G_TYPE_STRING, format->second.c_str(),
+			"width", G_TYPE_INT, msg->width,
+			"height", G_TYPE_INT, msg->height,
+			NULL);
+
+	gst_app_src_set_caps((GstAppSrc*)(appsrc_), caps);
+	NODELET_INFO("GST: appsrc caps: %s", gst_caps_to_string(caps));
+	gst_caps_unref(caps);
+
+	return true;
 }
 
 void GstVideoServerNodelet::image_cb(const sensor_msgs::Image::ConstPtr &msg)
 {
-	NODELET_DEBUG("got image");	// XXX
+	NODELET_INFO("got image: %d x %d", msg->width, msg->height);	// XXX
+
+	GstState pipeline_state;
+	int state_change;
+
+	//auto state_change = gst_element_get_state(pipeline_, &pipeline_state, nullptr, -1);
+	if (state_change == GST_STATE_CHANGE_ASYNC) {
+		NODELET_INFO("GST: pipeline changing state. frame dropped");
+		return;
+	}
+	else if (state_change == GST_STATE_CHANGE_FAILURE) {
+		NODELET_INFO("GST: pipeline state change failure. will retry...");
+	}
+	// pipeline not yet playing, configure and start
+	if (pipeline_state != GST_STATE_PLAYING) {
+		if (!configure_appsrc_caps(msg))
+			return;
+
+		gst_element_set_state(pipeline_, GST_STATE_PLAYING);
+	}
+
+	// XXX TODO: feed appsrc
 }
 
 }; // namespace gst_video_server
