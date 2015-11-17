@@ -12,6 +12,9 @@ namespace gst_video_server {
 
 namespace enc = sensor_msgs::image_encodings;
 
+GstClockTime operator "" _sec (unsigned long long sec) { return sec * GST_SECOND; }
+GstClockTime operator "" _ms (unsigned long long millisec) { return millisec * GST_MSECOND; }
+
 /**
  * Video server nodelet class
  */
@@ -207,23 +210,17 @@ bool GstVideoServerNodelet::configure_pipeline()
 	// Register bus watch callback.
 	auto bus = gst_element_get_bus(pipeline_);
 	bus_watch_id_ = gst_bus_add_watch(bus, &GstVideoServerNodelet::bus_message_cb_wrapper, this);
-
-#if 1
-	auto err = g_error_new(G_FILE_ERROR, G_FILE_ERROR_NOENT, "testing error message");
-	auto msg = gst_message_new_error(GST_OBJECT(pipeline_), err, "debug message");
-	gst_bus_post(bus, msg);
-#endif
 	gst_object_unref(GST_OBJECT(bus));
 
 	// pause pipeline
 	gst_element_set_state(pipeline_, GST_STATE_PAUSED);
-	//if (gst_element_get_state(pipeline_, nullptr, nullptr, -1) == GST_STATE_CHANGE_FAILURE) {
-	//	NODELET_ERROR("GST: state change error. Check your pipeline.");
-	//	return false;
-	//}
-	//else {
+	if (gst_element_get_state(pipeline_, nullptr, nullptr, 1_sec) == GST_STATE_CHANGE_FAILURE) {
+		NODELET_ERROR("GST: state change error. Check your pipeline.");
+		return false;
+	}
+	else {
 		NODELET_INFO("GST: pipeline paused.");
-	//}
+	}
 
 	return true;
 }
@@ -275,16 +272,17 @@ void GstVideoServerNodelet::image_cb(const sensor_msgs::Image::ConstPtr &msg)
 	NODELET_INFO("got image: %d x %d", msg->width, msg->height);	// XXX
 
 	GstState pipeline_state;
-	int state_change;
 
-	//auto state_change = gst_element_get_state(pipeline_, &pipeline_state, nullptr, -1);
+	auto state_change = gst_element_get_state(pipeline_, &pipeline_state, nullptr, 1_ms);
 	if (state_change == GST_STATE_CHANGE_ASYNC) {
+		// XXX{vooon): pipe do not leave that state until it got some images! FIXME
 		NODELET_INFO("GST: pipeline changing state. frame dropped");
 		return;
 	}
 	else if (state_change == GST_STATE_CHANGE_FAILURE) {
 		NODELET_INFO("GST: pipeline state change failure. will retry...");
 	}
+
 	// pipeline not yet playing, configure and start
 	if (pipeline_state != GST_STATE_PLAYING) {
 		if (!configure_appsrc_caps(msg))
