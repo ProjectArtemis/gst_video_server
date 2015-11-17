@@ -1,4 +1,5 @@
 
+#include <thread>
 #include <ros/ros.h>
 #include <nodelet/nodelet.h>
 #include <image_transport/image_transport.h>
@@ -11,6 +12,9 @@ namespace gst_video_server {
 
 namespace enc = sensor_msgs::image_encodings;
 
+/**
+ * Video server nodelet class
+ */
 class GstVideoServerNodelet : public nodelet::Nodelet
 {
 public:
@@ -26,25 +30,36 @@ private:
 	//! GStreamer pipeline string
 	std::string gsconfig_;
 
+	//! event loop, needed for gstreamer callbacks
+	GMainLoop *loop_;
+	std::thread loop_thread_;
+
 	//! GStreamer pipeline
 	GstElement *pipeline_;
 	GstElement *appsrc_;
 
 	//! offset from ROS to GST time
 	double time_offset_;
+	guint bus_watch_id_;
 
 	// XXX TODO
 
 	bool configure_pipeline();
 	bool configure_appsrc_caps(const sensor_msgs::Image::ConstPtr &msg);
 	void image_cb(const sensor_msgs::Image::ConstPtr &msg);
+
+	// callback
+	static gboolean bus_message_cb_wrapper(GstBus *bus, GstMessage *message, gpointer data);
+	gboolean bus_message_cb(GstBus *bus, GstMessage *message);
 };
 
 GstVideoServerNodelet::GstVideoServerNodelet() :
 	nodelet::Nodelet(),
 	pipeline_(nullptr),
 	appsrc_(nullptr),
-	time_offset_(0.0)
+	time_offset_(0.0),
+	bus_watch_id_(0),
+	loop_(nullptr)
 {
 }
 
@@ -61,7 +76,14 @@ GstVideoServerNodelet::~GstVideoServerNodelet()
 		gst_object_unref(GST_OBJECT(pipeline_));
 		pipeline_ = nullptr;
 	}
+
+	if (loop_ != nullptr) {
+		g_main_loop_quit(loop_);
+		if (loop_thread_.joinable())
+			loop_thread_.join();
+	}
 }
+
 
 void GstVideoServerNodelet::onInit()
 {
@@ -78,6 +100,22 @@ void GstVideoServerNodelet::onInit()
 		gsconfig_ = "autovideoconvert ! autovideosink";
 	}
 
+	// create and run main event loop
+	loop_ = g_main_loop_new(nullptr, FALSE);
+	g_assert(loop_);
+
+	loop_thread_ = std::thread(
+		[&]() {
+			// blocking
+			g_main_loop_run(loop_);
+			// terminated!
+			g_main_loop_unref(loop_);
+			loop_ = nullptr;
+		});
+	// NOTE(vooon): may cause a problem on non Linux, but i'm not care.
+	pthread_setname_np(loop_thread_.native_handle(), "g_main_loop_run");
+
+	// configure pipeline
 	NODELET_INFO("Pipeline: %s", gsconfig_.c_str());
 	configure_pipeline();
 
@@ -98,6 +136,7 @@ bool GstVideoServerNodelet::configure_pipeline()
 	pipeline_ = gst_parse_launch(gsconfig_.c_str(), &error);
 	if (pipeline_ == nullptr) {
 		NODELET_ERROR("GST: %s", error->message);
+		g_error_free(error);
 		return false;
 	}
 
@@ -165,6 +204,17 @@ bool GstVideoServerNodelet::configure_pipeline()
 	time_offset_ = now.toSec() - GST_TIME_AS_USECONDS(ct)/1e6;
 	NODELET_INFO("Time offset: %f", time_offset_);
 
+	// Register bus watch callback.
+	auto bus = gst_element_get_bus(pipeline_);
+	bus_watch_id_ = gst_bus_add_watch(bus, &GstVideoServerNodelet::bus_message_cb_wrapper, this);
+
+#if 1
+	auto err = g_error_new(G_FILE_ERROR, G_FILE_ERROR_NOENT, "testing error message");
+	auto msg = gst_message_new_error(GST_OBJECT(pipeline_), err, "debug message");
+	gst_bus_post(bus, msg);
+#endif
+	gst_object_unref(GST_OBJECT(bus));
+
 	// pause pipeline
 	gst_element_set_state(pipeline_, GST_STATE_PAUSED);
 	//if (gst_element_get_state(pipeline_, nullptr, nullptr, -1) == GST_STATE_CHANGE_FAILURE) {
@@ -210,10 +260,12 @@ bool GstVideoServerNodelet::configure_appsrc_caps(const sensor_msgs::Image::Cons
 			"width", G_TYPE_INT, msg->width,
 			"height", G_TYPE_INT, msg->height,
 			NULL);
+	auto capsstr = gst_caps_to_string(caps);
 
 	gst_app_src_set_caps((GstAppSrc*)(appsrc_), caps);
-	NODELET_INFO("GST: appsrc caps: %s", gst_caps_to_string(caps));
+	NODELET_INFO("GST: appsrc caps: %s", capsstr);
 	gst_caps_unref(caps);
+	g_free(capsstr);
 
 	return true;
 }
@@ -242,6 +294,62 @@ void GstVideoServerNodelet::image_cb(const sensor_msgs::Image::ConstPtr &msg)
 	}
 
 	// XXX TODO: feed appsrc
+}
+
+gboolean GstVideoServerNodelet::bus_message_cb_wrapper(GstBus *bus, GstMessage *message, gpointer data)
+{
+	auto self = static_cast<GstVideoServerNodelet*>(data);
+	g_assert(self);
+
+	return self->bus_message_cb(bus, message);
+}
+
+gboolean GstVideoServerNodelet::bus_message_cb(GstBus *bus, GstMessage *message)
+{
+	gchar *debug = nullptr;
+	GError *error = nullptr;
+
+
+	switch (GST_MESSAGE_TYPE(message)) {
+	case GST_MESSAGE_ERROR: {
+		gst_message_parse_error(message, &error, &debug);
+
+		NODELET_ERROR("GST: bus: %s", error->message);
+		if (debug != nullptr)
+			NODELET_ERROR("GST: debug: %s", debug); // ->DEBUG
+
+		break;
+	}
+	case GST_MESSAGE_WARNING: {
+		gst_message_parse_warning(message, &error, &debug);
+
+		NODELET_WARN("GST: bus: %s", error->message);
+		if (debug != nullptr)
+			NODELET_WARN("GST: debug: %s", debug);
+
+		break;
+	}
+	case GST_MESSAGE_INFO: {
+		gst_message_parse_info(message, &error, &debug);
+
+		NODELET_INFO("GST: bus: %s", error->message);
+		if (debug != nullptr)
+			NODELET_INFO("GST: debug: %s", debug);
+
+		break;
+	}
+	case GST_MESSAGE_EOS:
+		NODELET_ERROR("GST: bus EOS");
+		break;
+
+	default:
+		break;
+	}
+
+	if (error != nullptr) g_error_free(error);
+	g_free(debug);
+
+	return TRUE;
 }
 
 }; // namespace gst_video_server
