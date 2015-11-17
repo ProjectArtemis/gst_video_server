@@ -45,13 +45,19 @@ private:
 	double time_offset_;
 	guint bus_watch_id_;
 
-	// XXX TODO
-
+	//! create and initialize pipeline object
 	bool configure_pipeline();
-	bool configure_appsrc_caps(const sensor_msgs::Image::ConstPtr &msg);
+
+	//! create GstCaps for sensor_msgs::Image
+	GstCaps* gst_caps_new_from_image(const sensor_msgs::Image::ConstPtr &msg);
+
+	//! create GstSample from sendor_msgs::Image
+	GstSample* gst_sample_new_from_image(const sensor_msgs::Image::ConstPtr &msg);
+
+	//! image_raw topic callback
 	void image_cb(const sensor_msgs::Image::ConstPtr &msg);
 
-	// callback
+	//! gstreamer error printer
 	static gboolean bus_message_cb_wrapper(GstBus *bus, GstMessage *message, gpointer data);
 	gboolean bus_message_cb(GstBus *bus, GstMessage *message);
 };
@@ -70,6 +76,7 @@ GstVideoServerNodelet::~GstVideoServerNodelet()
 {
 	NODELET_INFO("Terminating gst_video_server...");
 	if (appsrc_ != nullptr) {
+		gst_app_src_end_of_stream(GST_APP_SRC_CAST(appsrc_));
 		gst_object_unref(GST_OBJECT(appsrc_));
 		appsrc_ = nullptr;
 	}
@@ -119,7 +126,6 @@ void GstVideoServerNodelet::onInit()
 	pthread_setname_np(loop_thread_.native_handle(), "g_main_loop_run");
 
 	// configure pipeline
-	NODELET_INFO("Pipeline: %s", gsconfig_.c_str());
 	configure_pipeline();
 
 	// finally: subscribe
@@ -129,11 +135,12 @@ void GstVideoServerNodelet::onInit()
 bool GstVideoServerNodelet::configure_pipeline()
 {
 	if (!gst_is_initialized()) {
-		NODELET_INFO("Initializing gstreamer");
+		NODELET_DEBUG("Initializing gstreamer");
 		gst_init(nullptr, nullptr);
 	}
 
-	NODELET_INFO("Gstreamer: %s", gst_version_string());
+	NODELET_INFO("Gstreamer version: %s", gst_version_string());
+	NODELET_INFO("Pipeline: %s", gsconfig_.c_str());
 
 	GError *error = nullptr;
 	pipeline_ = gst_parse_launch(gsconfig_.c_str(), &error);
@@ -149,6 +156,8 @@ bool GstVideoServerNodelet::configure_pipeline()
 		return false;
 	}
 
+	gst_app_src_set_stream_type(GST_APP_SRC_CAST(appsrc_), GST_APP_STREAM_TYPE_STREAM);
+
 	// gst_parse_launch() may produce not a pipeline
 	// thanks to gscam for example
 	if (GST_IS_PIPELINE(pipeline_)) {
@@ -159,7 +168,7 @@ bool GstVideoServerNodelet::configure_pipeline()
 		GstElement *inelement = gst_pad_get_parent_element(inpad);
 		g_assert(inelement);
 		gst_object_unref(GST_OBJECT(inpad));
-		NODELET_INFO("GST: inelement: %s", gst_element_get_name(inelement)); // XXX DEBUG
+		NODELET_DEBUG("GST: inelement: %s", gst_element_get_name(inelement));
 
 		if (!gst_bin_add(GST_BIN(pipeline_), appsrc_)) {
 			NODELET_ERROR("GST: gst_bin_add() failed!");
@@ -187,7 +196,7 @@ bool GstVideoServerNodelet::configure_pipeline()
 
 		gst_object_unparent(GST_OBJECT(launchpipe));
 
-		NODELET_INFO("GST: launchpipe: %s", gst_element_get_name(launchpipe)); // XXX DEBUG
+		NODELET_DEBUG("GST: launchpipe: %s", gst_element_get_name(launchpipe));
 		gst_bin_add_many(GST_BIN(pipeline_), appsrc_, launchpipe, nullptr);
 
 		if (!gst_element_link(appsrc_, launchpipe)) {
@@ -225,7 +234,7 @@ bool GstVideoServerNodelet::configure_pipeline()
 	return true;
 }
 
-bool GstVideoServerNodelet::configure_appsrc_caps(const sensor_msgs::Image::ConstPtr &msg)
+GstCaps* GstVideoServerNodelet::gst_caps_new_from_image(const sensor_msgs::Image::ConstPtr &msg)
 {
 	// http://gstreamer.freedesktop.org/data/doc/gstreamer/head/pwg/html/section-types-definitions.html
 	static const ros::M_string known_formats = {{
@@ -243,50 +252,54 @@ bool GstVideoServerNodelet::configure_appsrc_caps(const sensor_msgs::Image::Cons
 
 	if (msg->is_bigendian) {
 		NODELET_ERROR("GST: big endian image format is not supported");
-		return false;
+		return nullptr;
 	}
 
 	auto format = known_formats.find(msg->encoding);
 	if (format == known_formats.end()) {
 		NODELET_ERROR("GST: image format '%s' unknown", msg->encoding.c_str());
-		return false;
+		return nullptr;
 	}
 
-	auto caps = gst_caps_new_simple("video/x-raw",
+	return gst_caps_new_simple("video/x-raw",
 			"format", G_TYPE_STRING, format->second.c_str(),
 			"width", G_TYPE_INT, msg->width,
 			"height", G_TYPE_INT, msg->height,
-			NULL);
-	auto capsstr = gst_caps_to_string(caps);
+			nullptr);
+}
 
-	gst_app_src_set_caps((GstAppSrc*)(appsrc_), caps);
-	NODELET_INFO("GST: appsrc caps: %s", capsstr);
-	gst_caps_unref(caps);
-	g_free(capsstr);
-
-	return true;
+GstSample* GstVideoServerNodelet::gst_sample_new_from_image(const sensor_msgs::Image::ConstPtr &msg)
+{
+	// XXX TODO
+	return nullptr;
 }
 
 void GstVideoServerNodelet::image_cb(const sensor_msgs::Image::ConstPtr &msg)
 {
 	NODELET_INFO("got image: %d x %d", msg->width, msg->height);	// XXX
 
-	GstState pipeline_state;
+	GstState state, next_state;
 
-	auto state_change = gst_element_get_state(pipeline_, &pipeline_state, nullptr, 1_ms);
+	auto state_change = gst_element_get_state(pipeline_, &state, &next_state, 1_ms);
 	if (state_change == GST_STATE_CHANGE_ASYNC) {
-		// XXX{vooon): pipe do not leave that state until it got some images! FIXME
-		NODELET_INFO("GST: pipeline changing state. frame dropped");
-		return;
+		NODELET_INFO("GST: pipeline changing state...");
 	}
 	else if (state_change == GST_STATE_CHANGE_FAILURE) {
 		NODELET_INFO("GST: pipeline state change failure. will retry...");
+		NODELET_INFO("GST: next_state=%d", next_state);
 	}
 
 	// pipeline not yet playing, configure and start
-	if (pipeline_state != GST_STATE_PLAYING) {
-		if (!configure_appsrc_caps(msg))
-			return;
+	if (state != GST_STATE_PLAYING && next_state != GST_STATE_PLAYING) {
+		auto caps = gst_caps_new_from_image(msg);
+		auto capsstr = gst_caps_to_string(caps);
+
+		// really not needed because GstSample may change that anyway
+		gst_app_src_set_caps(GST_APP_SRC_CAST(appsrc_), caps);
+
+		NODELET_INFO("GST: appsrc caps: %s", capsstr);
+		gst_caps_unref(caps);
+		g_free(capsstr);
 
 		gst_element_set_state(pipeline_, GST_STATE_PLAYING);
 	}
