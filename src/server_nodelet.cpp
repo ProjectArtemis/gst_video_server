@@ -330,10 +330,10 @@ void GstVideoServerNodelet::image_cb(const sensor_msgs::Image::ConstPtr &msg)
 		return;
 
 #if GST_CHECK_VERSION(1, 5, 0)
-	gst_app_src_push_sample(GST_APP_SRC_CAST(appsrc_), sample); // XXX check return!
+	auto push_ret = gst_app_src_push_sample(GST_APP_SRC_CAST(appsrc_), sample);
 #else
 	// NOTE: that function does not increase ref count
-	// manual ref prevent problem becaused by bush_buffer
+	// manual ref prevent problem with bush_buffer
 	auto buffer = gst_sample_get_buffer(sample);
 	g_assert(buffer);
 	gst_buffer_ref(buffer);
@@ -341,11 +341,13 @@ void GstVideoServerNodelet::image_cb(const sensor_msgs::Image::ConstPtr &msg)
 	auto caps = gst_sample_get_caps(sample);
 	gst_app_src_set_caps(GST_APP_SRC_CAST(appsrc_), caps);
 
-	// that function steal buffer, so ref count shoul be 2 (sample + buffer)
-	gst_app_src_push_buffer(GST_APP_SRC_CAST(appsrc_), buffer);	// XXX: check return!
+	// that function steal buffer, so ref count should be 2 (sample + buffer)
+	auto push_ret = gst_app_src_push_buffer(GST_APP_SRC_CAST(appsrc_), buffer);
 #endif
 
 	gst_sample_unref(sample);
+
+	// TODO(vooon): check push_ret value!
 }
 
 gboolean GstVideoServerNodelet::bus_message_cb_wrapper(GstBus *bus, GstMessage *message, gpointer data)
