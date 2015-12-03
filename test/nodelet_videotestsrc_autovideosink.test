@@ -1,0 +1,34 @@
+<launch>
+  <!-- vim:set ft=xml ts=2 sw=2 et: -->
+  <!-- NOTE: this is manual test that uses GSCAM package to produce testing
+       video stream.
+
+       https://github.com/ros-drivers/gscam.git
+       -->
+
+  <!-- XXX NOTE: this test actually do not work because we got library conflict from loading both
+       gstreamer 0.10 and 1.0 to *same* process.
+       Need to find other test video generator that do not involve gst 0.10.
+       -->
+
+  <group ns="videotest">
+    <node name="nodelet_manager" pkg="nodelet" type="nodelet" args="manager" output="screen" required="true" />
+
+    <node name="gscam_videotestsrc" pkg="nodelet" type="nodelet" args="load gscam/GSCamNodelet nodelet_manager" output="screen">
+      <rosparam>
+        # gscam uses gstreamer 0.10
+        gscam_config: videotestsrc ! ffmpegcolorspace
+      </rosparam>
+    </node>
+
+    <node name="gst_video_server" pkg="nodelet" type="nodelet" args="load gst_video_server/server nodelet_manager" output="screen">
+      <rosparam>
+        # we use gstreamer 1.0
+        pipeline: autovideoconvert ! autovideosink
+      </rosparam>
+
+      <!-- this is not recommended way because it remaps only raw topic and not compressed, but works -->
+      <remap from="image_raw" to="camera/image_raw" />
+    </node>
+  </group>
+</launch>
