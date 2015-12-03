@@ -1,0 +1,25 @@
+<launch>
+  <!-- vim:set ft=xml ts=2 sw=2 et: -->
+  <!-- NOTE: this is manual test that uses GSCAM package to produce testing
+       video stream.
+
+       https://github.com/ros-drivers/gscam.git
+       -->
+
+  <group ns="videotest">
+    <node name="gscam_videotestsrc" pkg="gscam" type="gscam" output="screen">
+      <rosparam>
+        # gscam uses gstreamer 0.10
+        gscam_config: videotestsrc ! ffmpegcolorspace
+      </rosparam>
+    </node>
+
+    <!-- note: <remap> tag do not work for image topic names, devs recommend to place nodes to namespaces -->
+    <node ns="camera" name="gst_video_server" pkg="gst_video_server" type="server_node" output="screen">
+      <rosparam>
+        # we use gstreamer 1.0
+        pipeline: autovideoconvert ! autovideosink
+      </rosparam>
+    </node>
+  </group>
+</launch>
