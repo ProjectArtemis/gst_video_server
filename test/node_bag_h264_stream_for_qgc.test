@@ -1,0 +1,21 @@
+<launch>
+  <!-- vim:set ft=xml ts=2 sw=2 et: -->
+  <!-- NOTE: this manual test check streaming from ROS to QGroundControl
+       NEEDED: Bag file with video.
+               Video topic name: /px4_2/camera/image_raw
+       -->
+
+  <arg name="bagfile" default="$(env HOME)/downloads/px4_2_fly_over_debris.bag" />
+
+  <node name="bag_player" pkg="rosbag" type="play" args="$(arg bagfile)"  />
+
+  <node ns="/px4_2/camera" name="gst_video_server" pkg="gst_video_server" type="server_node" output="screen">
+    <rosparam>
+      # Test bag file with xvideosink
+      pipeline: autovideoconvert ! autovideosink
+      #
+      # gst-launch-1.0 filesrc location=test.avi ! decodebin ! autovideoconvert ! x264enc ! h264parse ! rtph264pay ! udpsink host=127.0.0.1 port=5000
+      #pipeline: autovideoconvert ! x264enc ! h264parse ! rtph264pay ! udpsink host=127.0.0.1 port=5000
+    </rosparam>
+  </node>
+</launch>
