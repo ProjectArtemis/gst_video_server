@@ -75,16 +75,20 @@ GstVideoServerNodelet::GstVideoServerNodelet() :
 GstVideoServerNodelet::~GstVideoServerNodelet()
 {
 	NODELET_INFO("Terminating gst_video_server...");
-	if (appsrc_ != nullptr) {
-		gst_app_src_end_of_stream(GST_APP_SRC_CAST(appsrc_));
-		gst_object_unref(GST_OBJECT(appsrc_));
-		appsrc_ = nullptr;
-	}
 
+	// pipeline bin manage appsrc deletion
 	if (pipeline_ != nullptr) {
+		gst_app_src_end_of_stream(GST_APP_SRC_CAST(appsrc_));
 		gst_element_set_state(pipeline_, GST_STATE_NULL);
 		gst_object_unref(GST_OBJECT(pipeline_));
 		pipeline_ = nullptr;
+		appsrc_ = nullptr;
+	}
+
+	// but if pipeline not created appsrc will be deleted here
+	if (appsrc_ != nullptr) {
+		gst_object_unref(GST_OBJECT(appsrc_));
+		appsrc_ = nullptr;
 	}
 
 	if (loop_ != nullptr) {
@@ -116,11 +120,13 @@ void GstVideoServerNodelet::onInit()
 
 	loop_thread_ = std::thread(
 		[&]() {
+			NODELET_DEBUG("GMainLoop started.");
 			// blocking
 			g_main_loop_run(loop_);
 			// terminated!
 			g_main_loop_unref(loop_);
 			loop_ = nullptr;
+			NODELET_INFO("GMainLoop terminated.");
 		});
 	// NOTE(vooon): may cause a problem on non Linux, but i'm not care.
 	pthread_setname_np(loop_thread_.native_handle(), "g_main_loop_run");
