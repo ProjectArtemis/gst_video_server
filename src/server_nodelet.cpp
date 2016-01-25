@@ -163,6 +163,7 @@ bool GstVideoServerNodelet::configure_pipeline()
 	}
 
 	gst_app_src_set_stream_type(GST_APP_SRC_CAST(appsrc_), GST_APP_STREAM_TYPE_STREAM);
+	g_object_set(GST_OBJECT(appsrc_), "format", GST_FORMAT_TIME, NULL);
 
 	// gst_parse_launch() may produce not a pipeline
 	// thanks to gscam for example
@@ -313,7 +314,9 @@ void GstVideoServerNodelet::image_cb(const sensor_msgs::Image::ConstPtr &msg)
 	}
 	else if (state_change == GST_STATE_CHANGE_FAILURE) {
 		NODELET_INFO("GST: pipeline state change failure. will retry...");
-		// TODO(vooon): need error handling and restart!
+		// TODO(vooon): restart works, but we may fall into infinite loop
+		gst_element_set_state(pipeline_, GST_STATE_NULL);
+		return;
 	}
 
 	// pipeline not yet playing, configure and start
@@ -400,6 +403,7 @@ gboolean GstVideoServerNodelet::bus_message_cb(GstBus *bus, GstMessage *message)
 	}
 	case GST_MESSAGE_EOS:
 		NODELET_ERROR("GST: bus EOS");
+		// TODO(vooon): self terminate. Error not recoverable.
 		break;
 
 	default:
