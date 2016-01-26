@@ -16,8 +16,7 @@
       #
       # gst-launch-1.0 filesrc location=test.avi ! decodebin ! autovideoconvert ! x264enc ! h264parse ! rtph264pay ! udpsink host=127.0.0.1 port=5000
       #pipeline: videoconvert ! x264enc ! rtph264pay ! udpsink host=127.0.0.1 port=5000
-      #pipeline: videorate skip-to-first=true ! video/x-raw,framerate=30/1 ! videoconvert ! timeoverlay ! x264enc ! video/x-h264, profile=baseline ! rtph264pay ! testsink
-      #udpsink host=127.0.0.1 port=5000
+      pipeline: videorate skip-to-first=true ! video/x-raw,framerate=30/1 ! videoconvert ! timeoverlay ! x264enc ! video/x-h264, profile=baseline ! rtph264pay ! udpsink host=127.0.0.1 port=5000
       #
       # H264 - AVI
       #pipeline: videorate skip-to-first=true ! video/x-raw,framerate=30/1 ! videoconvert ! timeoverlay ! x264enc ! video/x-h264, profile=baseline ! avimux ! filesink location=/tmp/test1.avi
@@ -30,7 +29,7 @@
       #pipeline: videoconvert ! video/x-raw, format=RGB ! jpegenc ! avimux ! filesink location=/tmp/test4.avi
       #pipeline: videoconvert ! videorate skip-to-first=true ! video/x-raw, format=RGB, framerate=5/1 ! timeoverlay ! jpegenc ! multifilesink location=/tmp/pict-5fps/%d.jpg
 
-      pipeline: videoconvert ! videorate skip-to-first=true ! video/x-raw, framerate=30/1 ! timeoverlay ! autovideosink
+      #pipeline: videoconvert ! videorate skip-to-first=true ! video/x-raw, framerate=30/1 ! timeoverlay ! autovideosink
       #pipeline: videoconvert ! videorate skip-to-first=false ! video/x-raw, framerate=30/1 ! timeoverlay ! autovideosink
     </rosparam>
   </node>

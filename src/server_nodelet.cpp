@@ -289,7 +289,7 @@ GstCaps* GstVideoServerNodelet::gst_caps_new_from_image(const sensor_msgs::Image
 			"format", G_TYPE_STRING, format->second.c_str(),
 			"width", G_TYPE_INT, msg->width,
 			"height", G_TYPE_INT, msg->height,
-			"framerate", GST_TYPE_FRACTION, 40, 1,	// 0/1 = dynamic
+			"framerate", GST_TYPE_FRACTION, 0, 1,	// 0/1 = dynamic
 			nullptr);
 }
 
@@ -318,11 +318,18 @@ GstClockTime GstVideoServerNodelet::gst_time_from_stamp(const ros::Time &stamp)
 #endif
 
 	// 3. use pipeline time.
-#if 1
+#if 0
 	g_assert(pipeline_);
 	auto clock = gst_pipeline_get_pipeline_clock(GST_PIPELINE(pipeline_));
 	auto ct = gst_clock_get_time(clock);
 	gst_object_unref(GST_OBJECT(clock));
+	return ct;
+#endif
+
+#if 1
+	static GstClockTime ct_prev = 0;
+	GstClockTime ct = ct_prev;
+	ct_prev += gst_util_uint64_scale_int(1, GST_SECOND, 40);
 	return ct;
 #endif
 }
@@ -334,6 +341,7 @@ GstSample* GstVideoServerNodelet::gst_sample_new_from_image(const sensor_msgs::I
 	g_assert(buffer);
 
 	auto ts = gst_time_from_stamp(msg->header.stamp);
+	NODELET_INFO("TS: %lld, %lld", ts, gst_util_uint64_scale_int(1, GST_SECOND, 40));
 
 	gst_buffer_fill(buffer, 0, msg->data.data(), msg->data.size());
 	GST_BUFFER_FLAG_SET(buffer, GST_BUFFER_FLAG_LIVE);
