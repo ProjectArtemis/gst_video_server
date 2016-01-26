@@ -32,7 +32,6 @@ private:
 
 	//! GStreamer pipeline string
 	std::string gsconfig_;
-	bool gs_use_stamp_;
 
 	//! Restart counter
 	size_t restart_counter_;
@@ -57,11 +56,11 @@ private:
 	//! create GstCaps for sensor_msgs::Image
 	GstCaps* gst_caps_new_from_image(const sensor_msgs::Image::ConstPtr &msg);
 
+	//! calculate gst time from image stamp
+	GstClockTime gst_time_from_stamp(const ros::Time &stamp);
+
 	//! create GstSample from sendor_msgs::Image
 	GstSample* gst_sample_new_from_image(const sensor_msgs::Image::ConstPtr &msg);
-
-	//! calculate gst time
-	GstClockTime gst_time_from_stamp(const ros::Time &stamp);
 
 	//! image_raw topic callback
 	void image_cb(const sensor_msgs::Image::ConstPtr &msg);
@@ -124,8 +123,6 @@ void GstVideoServerNodelet::onInit()
 		gsconfig_ = "autovideoconvert ! autovideosink";
 	}
 
-	priv_nh.param("use_stamp", gs_use_stamp_, false);
-
 	// create and run main event loop
 	loop_ = g_main_loop_new(nullptr, FALSE);
 	g_assert(loop_);
@@ -159,7 +156,6 @@ bool GstVideoServerNodelet::configure_pipeline()
 
 	NODELET_INFO("Gstreamer version: %s", gst_version_string());
 	NODELET_INFO("Pipeline: %s", gsconfig_.c_str());
-	NODELET_INFO_COND(gs_use_stamp_, "Timestamp usage enabled");
 
 	GError *error = nullptr;
 	pipeline_ = gst_parse_launch(gsconfig_.c_str(), &error);
@@ -176,9 +172,13 @@ bool GstVideoServerNodelet::configure_pipeline()
 	}
 
 	gst_app_src_set_stream_type(GST_APP_SRC_CAST(appsrc_), GST_APP_STREAM_TYPE_STREAM);
+	//gst_app_src_set_latency(GST_APP_SRC_CAST(appsrc_), 0, 200 * GST_MSECOND);
+	gst_app_src_set_latency(GST_APP_SRC_CAST(appsrc_), -1, -1);
 	g_object_set(GST_OBJECT(appsrc_),
-			"format", (gs_use_stamp_)? GST_FORMAT_TIME : GST_FORMAT_DEFAULT,
-			"is-live", true, NULL);
+			"format", GST_FORMAT_TIME,
+			"is-live", true,
+			"max-bytes", 0,
+			NULL);
 
 	// gst_parse_launch() may produce not a pipeline
 	// thanks to gscam for example
@@ -230,7 +230,7 @@ bool GstVideoServerNodelet::configure_pipeline()
 		}
 	}
 
-#if 1
+#if 0
 	// Calculating clock offset (should be before pausing else obtain will block)
 	auto clock = gst_system_clock_obtain();
 	auto now = ros::Time::now();
@@ -295,10 +295,17 @@ GstCaps* GstVideoServerNodelet::gst_caps_new_from_image(const sensor_msgs::Image
 
 GstClockTime GstVideoServerNodelet::gst_time_from_stamp(const ros::Time &stamp)
 {
+	// 1. using time_offset_ calced at startup
+#if 0
+	double ct_dt = stamp.toSec() - time_offset_;
+	return ct_dt * GST_SECOND;
+#endif
+
+	// 2. calc time_offset_ if needed, similar to n1
+#if 0
 	double ct_dt = stamp.toSec() - time_offset_;
 
-#if 0
-	if (false && (time_offset_ == 0 || ct_dt < 0)) {
+	if (time_offset_ == 0 || ct_dt < 0) {
 		auto clock = gst_pipeline_get_pipeline_clock(GST_PIPELINE(pipeline_));
 		auto ct = gst_clock_get_time(clock);
 		gst_object_unref(GST_OBJECT(clock));
@@ -306,9 +313,18 @@ GstClockTime GstVideoServerNodelet::gst_time_from_stamp(const ros::Time &stamp)
 		ct_dt = stamp.toSec() - time_offset_ + 1.0/30.0;
 		NODELET_INFO("Time offset: %f, dt: %f", time_offset_, ct_dt);
 	}
-#endif
 
 	return ct_dt * GST_SECOND;
+#endif
+
+	// 3. use pipeline time.
+#if 1
+	g_assert(pipeline_);
+	auto clock = gst_pipeline_get_pipeline_clock(GST_PIPELINE(pipeline_));
+	auto ct = gst_clock_get_time(clock);
+	gst_object_unref(GST_OBJECT(clock));
+	return ct;
+#endif
 }
 
 GstSample* GstVideoServerNodelet::gst_sample_new_from_image(const sensor_msgs::Image::ConstPtr &msg)
@@ -317,24 +333,18 @@ GstSample* GstVideoServerNodelet::gst_sample_new_from_image(const sensor_msgs::I
 	auto buffer = gst_buffer_new_allocate(nullptr, msg->data.size(), nullptr);
 	g_assert(buffer);
 
+	auto ts = gst_time_from_stamp(msg->header.stamp);
+
 	gst_buffer_fill(buffer, 0, msg->data.data(), msg->data.size());
 	GST_BUFFER_FLAG_SET(buffer, GST_BUFFER_FLAG_LIVE);
-	if (gs_use_stamp_) {
-		auto ts = gst_time_from_stamp(msg->header.stamp);
-
-		/* NOTE(vooon):
-		 * Bhen i fill any of that timestamp autovideosink show only first frame.
-		 * But that occurs only on node*_testvideosrc_autovideosink.test
-		 * node_bag_h264_stream_for_qgc.test (with autovideosink) works anyway.
-		 * Perhaps MONO8 video?
-		 *
-		 * I'm not sure on Presentation or Decoding time stamp should be set.
-		 */
-		GST_BUFFER_PTS(buffer) = GST_CLOCK_TIME_NONE;
-		//GST_BUFFER_DTS(buffer) = GST_CLOCK_TIME_NONE;
-		//GST_BUFFER_PTS(buffer) = ts;
-		GST_BUFFER_DTS(buffer) = ts;
-	}
+	/* NOTE(vooon):
+	 * Bhen i fill any of that timestamp autovideosink show only first frame.
+	 * But that occurs only on node*_testvideosrc_autovideosink.test
+	 * node_bag_h264_stream_for_qgc.test (with autovideosink) works anyway.
+	 * Perhaps MONO8 video?
+	 */
+	GST_BUFFER_PTS(buffer) = ts;
+	//GST_BUFFER_DURATION(buffer) = gst_util_uint64_scale_int(1, GST_SECOND, 40);
 
 	auto caps = gst_caps_new_from_image(msg);
 	if (caps == nullptr) {
