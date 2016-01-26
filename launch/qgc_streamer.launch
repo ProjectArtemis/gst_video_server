@@ -1,0 +1,14 @@
+<launch>
+  <node name="gst_video_server" pkg="gst_video_server" type="server_node" output="screen">
+    <rosparam> pipeline: 
+                videorate ! 
+                video/x-raw,framerate=30/1 ! 
+                videoconvert ! 
+                x264enc speed-preset=ultrafast tune=zerolatency byte-stream=true threads=1 key-int-max=15 intra-refresh=true ! 
+                video/x-h264, profile=baseline ! 
+                rtph264pay ! 
+                udpsink host=127.0.0.1 port=5000
+    </rosparam>
+    <remap from="image_raw" to="/camera/image_raw"/>
+  </node>
+</launch>
